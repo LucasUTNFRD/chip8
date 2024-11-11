@@ -29,6 +29,8 @@ const STACK_SIZE: usize = 16;
 pub const WIDTH: usize = 64;
 pub const HEIGHT: usize = 32;
 
+const NUM_KEYS: usize = 16;
+
 pub struct Emu {
     pc: u16,
     ram: [u8; RAM_SIZE],
@@ -39,6 +41,7 @@ pub struct Emu {
     delay_timer: u8,
     sound_timer: u8,
     screen: [bool; WIDTH * HEIGHT],
+    keys: [bool; NUM_KEYS],
 }
 
 impl Emu {
@@ -53,6 +56,7 @@ impl Emu {
             sound_timer: 0,
             screen: [false; WIDTH * HEIGHT],
             stack_pointer: 0,
+            keys: [false; NUM_KEYS],
         };
 
         new_emu.ram[..FONTSET_SIZE].copy_from_slice(&FONTSET);
@@ -245,6 +249,124 @@ impl Emu {
                 let msb = (self.v_registers[x] >> 7) & 1;
                 self.v_registers[x] <<= 1;
                 self.v_registers[0xF] = msb;
+            }
+            //9XY0
+            (9, _, _, 0) => {
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                if self.v_registers[x] != self.v_registers[y] {
+                    self.pc += 2;
+                }
+            }
+            //ANNN
+            (0xA, _, _, _) => {
+                let nnn = opcode & 0x0FFF; // 12-bits address
+                self.i_registers = nnn;
+            }
+            //BNNN
+            (0xB, _, _, _) => {
+                let nnn = opcode & 0x0FFF; // 12-bits address
+                self.pc = nnn + self.v_registers[0] as u16;
+            }
+            //CXNN
+            (0xC, _, _, _) => {
+                let x = digit2 as usize;
+                let nn = (opcode & 0x0FF) as u8; // 12-bits address
+                let random_byte: u8 = rand::random();
+                self.v_registers[x] = random_byte & nn;
+            }
+            //DXYN
+            // Draws a sprite at the coordinates specified by the values
+            // in registers VX and VY.
+            //  The sprite is 0xN pixels tall,
+            // and its data is read from memory starting at the address stored
+            // in the I register.
+            // The VF flag register is set if any pixels are flipped from
+            // set to unset or unset to set during the drawing process.
+            (0xD, _, _, _) => {
+                let x = digit2 as usize;
+                let x_coord = self.v_registers[x] as u16;
+                let y = digit3 as usize;
+                let y_coord = self.v_registers[y] as u16;
+
+                let num_of_rows = digit4;
+            }
+            //EX9E
+            (0xE, _, 9, 0xE) => {
+                let x = digit2 as usize;
+                let vx = self.v_registers[x];
+                let key = self.keys[vx as usize];
+                if key {
+                    self.pc += 2;
+                }
+            }
+            (0xE, _, 0xA, 1) => {
+                //skip key if not pressed
+                let x = digit2 as usize;
+                let vx = self.v_registers[x];
+                let key = self.keys[vx as usize];
+                if !key {
+                    self.pc += 2;
+                }
+            }
+            (0xF, _, 0, 7) => {
+                self.v_registers[digit2 as usize] = self.delay_timer;
+            }
+            (0xF, _, 0, A) => {
+                let x = digit2 as usize;
+                let mut pressed = false;
+                for i in 0..self.keys.len() {
+                    if self.keys[i] {
+                        self.v_registers[x] = i as u8;
+                        pressed = true;
+                        break;
+                    }
+                }
+                if !pressed {
+                    self.pc -= 2; //redo opcode
+                }
+            }
+            (0xF, _, 1, 5) => {
+                self.delay_timer = self.v_registers[digit2 as usize];
+            }
+            (0xF, _, 1, 8) => {
+                self.sound_timer = self.v_registers[digit2 as usize];
+            }
+            (0xF, _, 1, 0xE) => {
+                self.i_registers = self
+                    .i_registers
+                    .wrapping_add(self.v_registers[digit2 as usize] as u16);
+            }
+            (0xF, _, 2, 9) => {
+                //set i to font address
+                let c = self.v_registers[digit2 as usize] as u16;
+                self.i_registers = c * 5;
+            }
+            (0xF, _, 3, 3) => {
+                let x = digit2 as usize;
+                let vx = self.v_registers[x] as f32;
+
+                let digit_100 = (vx / 100.0).floor() as u8;
+                let digit_10 = ((vx / 10.0) % 10.0).floor() as u8;
+                let digit_1 = (vx % 10.0) as u8;
+
+                self.ram[self.i_registers as usize] = digit_100;
+                self.ram[(self.i_registers + 1) as usize] = digit_10;
+                self.ram[(self.i_registers + 2) as usize] = digit_1;
+            }
+            (0xF, _, 5, 5) => {
+                let x = digit2 as usize;
+                let i = self.i_registers as usize;
+                for idx in 0..=x {
+                    self.ram[i + idx] = self.v_registers[idx];
+                }
+            }
+            (0xF, _, 6, 5) => {
+                let x = digit2 as usize;
+                let i = self.i_registers as usize;
+                for idx in 0..=x {
+                    self.v_registers[i + idx] = self.ram[idx];
+                }
             }
             _ => {
                 todo!();
