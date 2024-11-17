@@ -63,6 +63,20 @@ impl Emu {
         new_emu
     }
 
+    pub fn get_display(&self) -> &[bool] {
+        &self.screen
+    }
+
+    pub fn keypress(&mut self, idx: usize, pressed: bool) {
+        self.keys[idx] = pressed;
+    }
+
+    pub fn load(&mut self, data: &[u8]) {
+        let start = START_ADDRESS as usize;
+        let end = (START_ADDRESS as usize) + data.len();
+        self.ram[start..end].copy_from_slice(data);
+    }
+
     pub fn push(&mut self, val: u16) {
         self.stack[self.stack_pointer as usize] = val;
         self.stack_pointer += 1;
